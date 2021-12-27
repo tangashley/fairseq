@@ -254,7 +254,8 @@ def post_process_prediction(
 def make_positions(tensor, padding_idx: int, onnx_trace: bool = False):
     """Replace non-padding symbols with their position numbers.
 
-    Position numbers begin at padding_idx+1. Padding symbols are ignored.
+    Position numbers begin at padding_idx+1. This is so that the first position is not confused as a padding token.
+    Padding symbols are ignored.
     """
     # The series of casts and type-conversions here are carefully
     # balanced to both work with ONNX export and XLA. In particular XLA
@@ -681,8 +682,8 @@ def extract_hard_alignment(attn, src_sent, tgt_sent, pad, eos):
 
 
 def extract_soft_alignment(attn, src_sent, tgt_sent, pad, eos):
-    tgt_valid = ((tgt_sent != pad)).nonzero(as_tuple=False)
-    src_valid = ((src_sent != pad)).nonzero(as_tuple=False).squeeze(dim=-1)
+    tgt_valid = ((tgt_sent != pad) & (tgt_sent != eos)).nonzero(as_tuple=False)
+    src_valid = ((src_sent != pad) & (src_sent != eos)).nonzero(as_tuple=False).squeeze(dim=-1)
     alignment = []
     if len(tgt_valid) != 0 and len(src_valid) != 0:
         attn_valid = attn[tgt_valid, src_valid]

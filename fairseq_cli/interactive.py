@@ -16,7 +16,7 @@ import sys
 import time
 from argparse import Namespace
 from collections import namedtuple
-
+from pathlib import Path
 import numpy as np
 import torch
 from fairseq import checkpoint_utils, distributed_utils, options, tasks, utils
@@ -204,25 +204,59 @@ def main(cfg: FairseqConfig):
     logger.info("NOTE: hypothesis and token scores are output in base 2")
     logger.info("Type the input sentence and press return:")
     start_id = 0
+
+
+
+    # load attention position if combine_attn_pos is true
+    if cfg.dataset.combine_attn_pos:
+        test_attn_pos_map = {}
+
+        with open(cfg.dataset.attn_pos_path + '/test/attn_pos.txt', 'r', encoding='utf-8') as train_pos:
+            for i, line in enumerate(train_pos):
+                line = line.strip()
+                # pos + 1, because attn alignment starts from 0, but positional embedding starts from 1. Later when
+                # calculating position embedding, it will + padding_idx again to ignore padding
+                test_attn_pos_map[i] = [int(pos) + 1 for pos in line.split()]
+
+
     for inputs in buffered_read(cfg.interactive.input, cfg.interactive.buffer_size):
         results = []
+        # save attention words and positions if save_attn is true
+        if cfg.generation.save_attn:
+            attn_pos_all = []
+            attn_words_all = []
+
         for batch in make_batches(inputs, cfg, task, max_positions, encode_fn):
             bsz = batch.src_tokens.size(0)
             src_tokens = batch.src_tokens
             src_lengths = batch.src_lengths
             constraints = batch.constraints
+
+            # get attention positions for samples in the batch
+            # attn_pos will align with the corresponding sentence based on the sentence_id
+            if cfg.dataset.combine_attn_pos:
+                attn_pos = [test_attn_pos_map[sentence_id] for sentence_id in (batch.ids + start_id).tolist()]
+
             if use_cuda:
                 src_tokens = src_tokens.cuda()
                 src_lengths = src_lengths.cuda()
                 if constraints is not None:
                     constraints = constraints.cuda()
-
-            sample = {
-                "net_input": {
-                    "src_tokens": src_tokens,
-                    "src_lengths": src_lengths,
-                },
-            }
+            if cfg.dataset.combine_attn_pos:
+                sample = {
+                    "net_input": {
+                        "src_tokens": src_tokens,
+                        "src_lengths": src_lengths,
+                        "attn_pos": attn_pos
+                    },
+                }
+            else:
+                sample = {
+                    "net_input": {
+                        "src_tokens": src_tokens,
+                        "src_lengths": src_lengths
+                    },
+                }
             translate_start_time = time.time()
             translations = task.inference_step(
                 generator, models, sample, constraints=constraints
@@ -291,10 +325,53 @@ def main(cfg: FairseqConfig):
                     )
                 )
                 if cfg.generation.print_alignment:
-                    alignment_str = " ".join(
-                        ["{}-{}".format(src, tgt) for src, tgt in alignment]
-                    )
-                    print("A-{}\t{}".format(id_, alignment_str))
+                    if cfg.generation.print_alignment == "hard":
+                        alignment_str = " ".join(
+                            ["{}-{}".format(src, tgt) for src, tgt in alignment]
+                        )
+                        print("A-{}\t{}".format(id_, alignment_str))
+
+                    # if cfg.generation.print_alignment == "soft":
+                        # alignment_str = " ".join(["[" + ",".join(src_probs) + "] " for src_probs in alignment])
+
+                    # print("A-{}\t{}".format(id_, alignment_str))
+
+                # extract attn positions and words
+                if cfg.generation.save_attn:
+                    if cfg.generation.print_alignment == "hard":
+                        attn_pos_all.append([src for src, _ in alignment])
+                        # print(attn_pos_all[-1])
+                        attn_words_in_order = [src_tokens[src] for src, _ in alignment]
+                        # print(attn_words_in_order)
+                        attn_words_all.append(src_dict.string(attn_words_in_order))
+                        # print(attn_words_all[-1])
+                    else:
+                        k = cfg.generation.attn_top_k
+                        # get top k positions
+                        alignment = np.asarray(alignment)
+                        top_k_pos = np.array([np.argpartition(a, -k)[-k:] if a.size > k
+                                              else np.argpartition(a, -(a.size))[-(a.size):] for a in alignment])
+                        # sort top k positions in decending order
+                        ordered_top_k_pos = [top_k[np.argsort(a[top_k])][::-1] for a, top_k in
+                                             zip(alignment, top_k_pos)]
+                        attn_pos_all.append([p for pos in ordered_top_k_pos for p in pos])
+                        # print(attn_pos_all[-1])
+                        attn_words_in_order = [src_tokens[p] for pos in ordered_top_k_pos for p in pos]
+                        # print(attn_words_in_order)
+                        attn_words_all.append(src_dict.string(attn_words_in_order))
+                        # print(attn_words_all[-1])
+
+        # write attn positions and words to corresponding files
+        if cfg.generation.save_attn:
+            if not Path(cfg.generation.attn_save_dir).exists():
+                os.makedirs(cfg.generation.attn_save_dir)
+            with open(os.path.join(cfg.generation.attn_save_dir, 'attn_pos.txt'), 'a+', encoding='utf-8') as f:
+                for item in attn_pos_all:
+                    f.write("%s\n" % ' '.join([str(pos) for pos in item]))
+
+            with open(os.path.join(cfg.generation.attn_save_dir, 'attn_words.txt'), 'a+', encoding='utf-8') as f:
+                for item in attn_words_all:
+                    f.write("%s\n" % item)
 
         # update running id_ counter
         start_id += len(inputs)

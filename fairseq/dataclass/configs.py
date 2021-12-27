@@ -442,6 +442,12 @@ class DistributedTrainingConfig(FairseqDataclass):
 
 @dataclass
 class DatasetConfig(FairseqDataclass):
+    combine_attn_pos: bool = field(
+        default=False, metadata={"help": "combine attn positions in training"},
+    )
+    attn_pos_path: str = field(
+        default='saved_attn', metadata={"help": "path to saved attn positions"}
+    )
     num_workers: int = field(
         default=1, metadata={"help": "how many subprocesses to use for data loading"}
     )
@@ -772,6 +778,15 @@ class FairseqBMUFConfig(FairseqDataclass):
 
 @dataclass
 class GenerationConfig(FairseqDataclass):
+    save_attn: bool = field(
+        default=False, metadata={"help": "save attn positions and source words to files or not"},
+    )
+    attn_save_dir: str = field(
+        default='saved_attn', metadata={"help": "path to save attn positions and source words"}
+    )
+    attn_top_k: int = field(
+        default=1, metadata={"help": "top k attn positions and source words for each target word"}
+    )
     beam: int = field(
         default=5, metadata={"help": "beam size"},
     )

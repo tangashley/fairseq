@@ -283,10 +283,37 @@ def train(
     valid_subsets = cfg.dataset.valid_subset.split(",")
     should_stop = False
     num_updates = trainer.get_num_updates()
+
+    # get attn_pos for training and validation data
+    if cfg.dataset.combine_attn_pos:
+        train_attn_pos_map = {}
+        valid_attn_pos_map = {}
+
+        with open(cfg.dataset.attn_pos_path + '/train/attn_pos.txt', 'r', encoding='utf-8') as train_pos:
+            for i, line in enumerate(train_pos):
+                line = line.strip()
+                # pos + 1, because attn alignment starts from 0, but positional embedding starts from 1. Later when
+                # calculating position embedding, it will + padding_idx again to ignore padding
+                train_attn_pos_map[i] = [int(pos)+1 for pos in line.split()]
+
+        with open(cfg.dataset.attn_pos_path + '/valid/attn_pos.txt', 'r', encoding='utf-8') as valid_pos:
+            for i, line in enumerate(valid_pos):
+                line = line.strip()
+                # pos + 1, because attn alignment starts from 0, but positional embedding starts from 1. Later when
+                # calculating position embedding, it will + padding_idx again to ignore padding
+                valid_attn_pos_map[i] = [int(pos)+1 for pos in line.split()]
+
     logger.info("Start iterating over samples")
     for i, samples in enumerate(progress):
+        # get attn_pos for this batch based on sentence ids.
+        if cfg.dataset.combine_attn_pos:
+            for sample in samples:
+                # attn_pos will align with the corresponding sentence based on the sentence_id
+                attn_pos = [train_attn_pos_map[sentence_id] for sentence_id in sample['id'].tolist()]
+                sample['net_input']['attn_pos'] = attn_pos
+
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
-            "train_step-%d" % i
+                "train_step-%d" % i
         ):
             log_output = trainer.train_step(samples)
 

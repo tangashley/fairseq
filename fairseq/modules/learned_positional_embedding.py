@@ -33,6 +33,7 @@ class LearnedPositionalEmbedding(nn.Embedding):
         input: Tensor,
         incremental_state: Optional[Dict[str, Dict[str, Optional[Tensor]]]] = None,
         positions: Optional[Tensor] = None,
+        attn_pos: Optional[Tensor] = None
     ):
         """Input is expected to be of size [bsz x seqlen]."""
         assert (positions is None) or (
@@ -50,6 +51,9 @@ class LearnedPositionalEmbedding(nn.Embedding):
                 positions = utils.make_positions(
                     input, self.padding_idx, onnx_trace=self.onnx_trace
                 )
+                if attn_pos is not None:
+                    for i in range(len(attn_pos)):
+                        positions[i, -len(attn_pos[i]) - 1: -1] = torch.tensor(attn_pos[i]) + self.padding_idx
         return F.embedding(
             positions,
             self.weight,

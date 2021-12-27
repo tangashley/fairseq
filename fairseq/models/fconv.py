@@ -221,7 +221,7 @@ class FConvEncoder(FairseqEncoder):
             layer_in_channels.append(out_channels)
         self.fc2 = Linear(in_channels, embed_dim)
 
-    def forward(self, src_tokens, src_lengths):
+    def forward(self, src_tokens, src_lengths, **kwargs):
         """
         Args:
             src_tokens (LongTensor): tokens in the source language of shape
@@ -240,7 +240,12 @@ class FConvEncoder(FairseqEncoder):
                   padding elements of shape `(batch, src_len)`
         """
         # embed tokens and positions
-        x = self.embed_tokens(src_tokens) + self.embed_positions(src_tokens)
+
+        if 'attn_pos' in kwargs:
+            attn_pos = kwargs['attn_pos']
+            x = self.embed_tokens(src_tokens) + self.embed_positions(src_tokens, attn_pos=attn_pos)
+        else:
+            x = self.embed_tokens(src_tokens) + self.embed_positions(src_tokens)
         x = self.dropout_module(x)
         input_embedding = x
 
