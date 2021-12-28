@@ -115,14 +115,18 @@ class TransformerEncoderBase(FairseqEncoder):
         return layer
 
     def forward_embedding(
-        self, src_tokens, token_embedding: Optional[torch.Tensor] = None
+        self, src_tokens, token_embedding: Optional[torch.Tensor] = None,
+            attn_pos: Optional[torch.Tensor] = None
     ):
         # embed tokens and positions
         if token_embedding is None:
             token_embedding = self.embed_tokens(src_tokens)
         x = embed = self.embed_scale * token_embedding
         if self.embed_positions is not None:
-            x = embed + self.embed_positions(src_tokens)
+            if attn_pos is None:
+                x = embed + self.embed_positions(src_tokens)
+            else:
+                x = embed + self.embed_positions(src_tokens, attn_pos=attn_pos)
         if self.layernorm_embedding is not None:
             x = self.layernorm_embedding(x)
         x = self.dropout_module(x)
@@ -136,6 +140,7 @@ class TransformerEncoderBase(FairseqEncoder):
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
+        attn_pos: Optional[torch.Tensor] = None,
     ):
         """
         Args:
@@ -161,7 +166,7 @@ class TransformerEncoderBase(FairseqEncoder):
                   Only populated if *return_all_hiddens* is True.
         """
         return self.forward_scriptable(
-            src_tokens, src_lengths, return_all_hiddens, token_embeddings
+            src_tokens, src_lengths, return_all_hiddens, token_embeddings, attn_pos
         )
 
     # TorchScript doesn't support super() method so that the scriptable Subclass
@@ -174,6 +179,7 @@ class TransformerEncoderBase(FairseqEncoder):
         src_lengths: Optional[torch.Tensor] = None,
         return_all_hiddens: bool = False,
         token_embeddings: Optional[torch.Tensor] = None,
+        attn_pos: Optional[torch.Tensor] = None,
     ):
         """
         Args:
@@ -202,7 +208,7 @@ class TransformerEncoderBase(FairseqEncoder):
         encoder_padding_mask = src_tokens.eq(self.padding_idx)
         has_pads = src_tokens.device.type == "xla" or encoder_padding_mask.any()
 
-        x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings)
+        x, encoder_embedding = self.forward_embedding(src_tokens, token_embeddings, attn_pos)
 
         # account for padding while computing the representation
         if has_pads:
